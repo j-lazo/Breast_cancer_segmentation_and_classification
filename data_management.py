@@ -1,14 +1,15 @@
-import os
-import tqdm
+
 import numpy as np
 import tensorflow as tf
 import random
-
+import os
+import yaml
+import datetime
+import tqdm
 
 def load_dataset_from_directory(path_frames):
     output_dict = {}
     class_folders = [f for f in os.listdir(path_frames) if os.path.isdir(os.path.join(path_frames, f))]
-    img_formats_accepted = ['.png', '.jpg', '.jpeg']
 
     # read dictionary of list (cases) each list has a dictionary of frames
     for folder in tqdm.tqdm(class_folders, desc=f"Loading data"):
@@ -99,3 +100,53 @@ def make_tf_image_dataset(dictionary_labels, batch_size=2, training_mode=False,
     print(f'TF dataset with {len(path_imgs)} elements')
 
     return ds
+
+
+def generate_experiment_ID(name_model='', learning_rate='na', batch_size='na', backbone_model='',
+                           prediction_model=''):
+    """
+    Generate a ID name for the experiment considering the name of the model, the learning rate,
+    the batch size, and the date of the experiment
+
+    :param name_model: (str)
+    :param learning_rate: (float)
+    :param batch_size: (int)
+    :param backbone_model: (str)
+    :return: (str) id name
+    """
+    if type(learning_rate) == list:
+        lr = learning_rate[0]
+    else:
+        lr = learning_rate
+
+    if prediction_model == '':
+        training_date_time = datetime.datetime.now()
+        if backbone_model != '':
+            name_mod = ''.join([name_model, '+', backbone_model])
+        else:
+            name_mod = name_model
+
+        id_name = ''.join([name_mod, '_',  '_lr_', str(lr),
+                          '_bs_', str(batch_size), '_',
+                           training_date_time.strftime("%d_%m_%Y_%H_%M")
+                           ])
+    else:
+        predictions_date_time = datetime.datetime.now()
+        id_name = ''.join([prediction_model, '_predictions_', predictions_date_time.strftime("%d_%m_%Y_%H_%M")])
+
+    return id_name
+
+
+def check_path_exists(path, default_ext):
+    name, ext = os.path.splitext(path)
+    if ext == '':
+        if default_ext[0] == '.':
+            default_ext = default_ext[1:]
+        path = name + '.' + default_ext
+    return path
+
+
+def save_yaml(path, data, **kwargs):
+    path = check_path_exists(path, 'yml')
+    with open(path, 'w') as f:
+        yaml.dump(data, f, **kwargs)
