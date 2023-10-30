@@ -3,7 +3,7 @@ import os
 import tensorflow as tf
 from tensorflow import keras
 import data_management as dam
-import classification_models
+from classification_models import *
 import datetime
 import numpy as np
 
@@ -63,9 +63,10 @@ def custome_training(model_name, path_dataset, max_epochs, patience=15, results_
     if model_name == 'simple_classifier':
         model = simple_classifier(len(unique_classes), backbone=backbone_network)
         model.summary()
-        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+        model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=metrics)
 
-    loss_fn = loss
+    #loss_fn = tf.keras.losses.CategoricalCrossentropy
+    loss_fn = keras.losses.SparseCategoricalCrossentropy(from_logits=False)
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     train_loss = tf.keras.metrics.Mean(name='train_loss')
     train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
@@ -75,10 +76,9 @@ def custome_training(model_name, path_dataset, max_epochs, patience=15, results_
 
     # ID name for the folder and results
     backbone_model = backbone_network
-    new_results_id = dam.generate_experiment_ID(name_model=name_model, learning_rate=learning_rate,
-                                                batch_size=batch_size, backbone_model=backbone_model,
-                                                mode=mode, specific_domain=specific_domain)
-    path_pretrained_model_name = os.path.split(os.path.normpath(path_pretrained_model))[-1]
+    new_results_id = dam.generate_experiment_ID(name_model=model_name, learning_rate=learning_rate,
+                                                batch_size=batch_size, backbone_model=backbone_model)
+
     # the information needed for the yaml
     training_date_time = datetime.datetime.now()
     information_experiment = {'experiment folder': new_results_id,
@@ -86,16 +86,15 @@ def custome_training(model_name, path_dataset, max_epochs, patience=15, results_
                               'name model': 'semi_supervised_resnet101',
                               'backbone': backbone_model,
                               'batch size': int(batch_size),
-                              'learning rate': float(learning_rate),
-                              'teacher_model': path_pretrained_model_name}
+                              'learning rate': float(learning_rate)}
 
     results_directory = ''.join([results_dir, '/', new_results_id, '/'])
-    # if results experiment doesn't exists create it
+    # if results experiment doesn't exist create it
     if not os.path.isdir(results_directory):
         os.mkdir(results_directory)
 
     path_experiment_information = os.path.join(results_directory, 'experiment_information.yaml')
-    fam.save_yaml(path_experiment_information, information_experiment)
+    dam.save_yaml(path_experiment_information, information_experiment)
 
     train_summary_writer = tf.summary.create_file_writer(os.path.join(results_directory, 'summaries', 'train'))
     val_summary_writer = tf.summary.create_file_writer(os.path.join(results_directory, 'summaries', 'val'))
@@ -105,6 +104,7 @@ def custome_training(model_name, path_dataset, max_epochs, patience=15, results_
         with tf.GradientTape() as tape:
             predictions = model(images, training=True)
             t_loss = loss_fn(y_true=labels, y_pred=predictions)
+            print(t_loss)
         gradients = tape.gradient(t_loss, model.trainable_variables)
         optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
 
@@ -136,7 +136,7 @@ def custome_training(model_name, path_dataset, max_epochs, patience=15, results_
     # start training
     valid_dataset = train_dataset
     best_loss = 999
-
+    start_time = datetime.datetime.now()
     for epoch in range(max_epochs):
         t = time.time()
         train_loss.reset_states()
@@ -184,3 +184,11 @@ def custome_training(model_name, path_dataset, max_epochs, patience=15, results_
         if wait >= patience:
             print('Early stopping triggered: wait time > patience')
             break
+
+    model_dir = os.path.join(results_directory, 'model_weights')
+    os.mkdir(model_dir)
+    model_dir = ''.join([model_dir, '/saved_weights'])
+    model.save(filepath=model_dir, save_format='tf')
+    print(f'model saved at {model_dir}')
+
+    print('Total Training TIME:', (datetime.datetime.now() - start_time))
