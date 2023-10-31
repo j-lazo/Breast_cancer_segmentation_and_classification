@@ -1,11 +1,12 @@
 import time
 import os
-import tensorflow as tf
-from tensorflow import keras
 import data_management as dam
 from classification_models import *
 import datetime
 import numpy as np
+import pandas as pd
+import tqdm
+import data_analysis as daa
 
 
 def eager_train(model, train_dataset, epochs, batch_size):
@@ -50,23 +51,27 @@ def eager_train(model, train_dataset, epochs, batch_size):
                     print("Seen so far: %s samples" % ((step + 1) * batch_size))
 
 
-def custome_training(model_name, path_dataset, max_epochs, patience=15, results_directory=os.getcwd(), batch_size=2,
+def custom_training(model_name, path_train_dataset, path_val_dataset, max_epochs, patience=15, batch_size=2,
                      learning_rate=0.0001, results_dir=os.path.join(os.getcwd(), 'results'), backbone_network='resnet101',
-                     loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False), metrics=[],
-                     optimizer=tf.keras.optimizers.Adam(learning_rate=0.001)):
+                     loss=keras.losses.SparseCategoricalCrossentropy(from_logits=False), metrics=[],
+                     optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+                     path_test_data=''):
 
-    dataset_dict = dam.load_dataset_from_directory(path_dataset)
-    train_dataset = dam.make_tf_image_dataset(dataset_dict, training_mode=True, input_size=[224, 224],
+    train_dataset_dict = dam.load_dataset_from_directory(path_train_dataset)
+    train_dataset = dam.make_tf_image_dataset(train_dataset_dict, training_mode=True, input_size=[224, 224],
                                           batch_size=batch_size)
-    unique_classes = np.unique([dataset_dict[k]['class'] for k in dataset_dict.keys()])
+    unique_classes = np.unique([train_dataset_dict[k]['class'] for k in train_dataset_dict.keys()])
+
+    valid_dataset_dict = dam.load_dataset_from_directory(path_val_dataset)
+    valid_dataset = dam.make_tf_image_dataset(valid_dataset_dict, training_mode=True, input_size=[224, 224],
+                                              batch_size=batch_size)
 
     if model_name == 'simple_classifier':
         model = simple_classifier(len(unique_classes), backbone=backbone_network)
         model.summary()
         model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=metrics)
 
-    #loss_fn = tf.keras.losses.CategoricalCrossentropy
-    loss_fn = keras.losses.SparseCategoricalCrossentropy(from_logits=False)
+    loss_fn = loss
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     train_loss = tf.keras.metrics.Mean(name='train_loss')
     train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
@@ -128,22 +133,31 @@ def custome_training(model_name, path_dataset, max_epochs, patience=15, results_
         predictions = model(images, training=False)
         return predictions
 
-    # if path_dataset in list_datasets:
-    #    path_dataset = os.path.join(os.getcwd(), 'datasets', path_dataset)
-
     patience = patience
     wait = 0
     # start training
-    valid_dataset = train_dataset
     best_loss = 999
     start_time = datetime.datetime.now()
+    epoch_counter = list()
+    train_loss_list = list()
+    train_accuracy_list = list()
+
+    model_dir = os.path.join(results_directory, 'model_weights')
+    os.mkdir(model_dir)
+    model_dir = ''.join([model_dir, '/saved_weights'])
+
     for epoch in range(max_epochs):
+        epoch_counter.append(epoch)
+        train_loss_list.append(train_loss.result().numpy())
+        train_accuracy_list.append(train_accuracy.result().numpy())
+
         t = time.time()
         train_loss.reset_states()
         train_accuracy.reset_states()
         valid_loss.reset_states()
         valid_accuracy.reset_states()
         step = 0
+
         template = 'ETA: {} - epoch: {} loss: {:.5f}  acc: {:.5f}'
         for x, train_labels in train_dataset:
             step += 1
@@ -185,10 +199,47 @@ def custome_training(model_name, path_dataset, max_epochs, patience=15, results_
             print('Early stopping triggered: wait time > patience')
             break
 
-    model_dir = os.path.join(results_directory, 'model_weights')
-    os.mkdir(model_dir)
-    model_dir = ''.join([model_dir, '/saved_weights'])
     model.save(filepath=model_dir, save_format='tf')
     print(f'model saved at {model_dir}')
-
     print('Total Training TIME:', (datetime.datetime.now() - start_time))
+
+    if path_test_data:
+
+        print(f'Making predictions on test dataset: {path_test_data}')
+        # 2Do load saved model
+
+        test_dataset_dict = dam.load_dataset_from_directory(path_test_data)
+        test_dataset = dam.make_tf_image_dataset(test_dataset_dict, training_mode=False, input_size=[224, 224], batch_size=1)
+
+        list_images = [test_dataset_dict[x]['Frame_id'] for x in test_dataset_dict.keys()]
+        list_labels = [test_dataset_dict[x]['class'] for x in test_dataset_dict.keys()]
+        unique_class = list(np.unique([train_dataset_dict[k]['class'] for k in train_dataset_dict.keys()]))
+        test_labels = [unique_class.index(x) for x in list_labels]
+
+        list_predictions = list()
+        i = 0
+        for j, data_batch in enumerate(tqdm.tqdm(test_dataset, desc='Making predictions on test dataset')):
+            x = data_batch[0]
+            img = x[0]
+            image = tf.expand_dims(img, axis=0)
+            pred = prediction_step(image)
+            prediction = list(pred.numpy()[0])
+            prediction_label = unique_class[prediction.index(np.max(prediction))]
+            list_predictions.append(prediction_label)
+            i += 1
+
+        header_column = list()
+        header_column.insert(0, 'img name')
+        header_column.append('real label')
+        header_column.append('predicted label')
+
+        df = pd.DataFrame(list(zip(list_images, list_labels, list_predictions)), columns=header_column)
+
+        path_results_csv_file = os.path.join(results_directory, 'predictions.csv')
+        df.to_csv(path_results_csv_file, index=False)
+
+        print(f'csv file with results saved: {path_results_csv_file}')
+
+        dir_conf_matrix = os.path.join(results_directory, 'confusion_matrix.png')
+        daa.compute_confusion_matrix(list_labels, list_predictions, plot_figure=False,
+                                 dir_save_fig=dir_conf_matrix)
