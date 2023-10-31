@@ -7,6 +7,7 @@ import yaml
 import datetime
 import tqdm
 
+
 def load_dataset_from_directory(path_frames):
     output_dict = {}
     class_folders = [f for f in os.listdir(path_frames) if os.path.isdir(os.path.join(path_frames, f))]
@@ -102,8 +103,7 @@ def make_tf_image_dataset(dictionary_labels, batch_size=2, training_mode=False,
     return ds
 
 
-def generate_experiment_ID(name_model='', learning_rate='na', batch_size='na', backbone_model='',
-                           prediction_model=''):
+def generate_experiment_ID(name_model='', learning_rate='na', batch_size='na', backbone_model='', prediction_model=''):
     """
     Generate a ID name for the experiment considering the name of the model, the learning rate,
     the batch size, and the date of the experiment
