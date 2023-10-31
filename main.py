@@ -12,7 +12,8 @@ def main(_argv):
     physical_devices = tf.config.list_physical_devices('GPU')
     print("Num GPUs:", len(physical_devices))
 
-    path_dataset = FLAGS.path_dataset
+    path_dataset = FLAGS.path_train_dataset
+    path_val_dataset = FLAGS.path_val_dataset
     type_training = FLAGS.type_training
     name_model = FLAGS.name_model
     batch_size = FLAGS.batch_size
@@ -21,7 +22,7 @@ def main(_argv):
     learning_rate = FLAGS.learning_rate
     backbone = FLAGS.backbone
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-    loss = tf.keras.losses.CategoricalCrossentropy
+    loss = keras.losses.SparseCategoricalCrossentropy(from_logits=False)
     metrics = ["accuracy", tf.keras.metrics.Precision(name='precision'),
                tf.keras.metrics.Recall(name='recall')]
 
@@ -34,18 +35,31 @@ def main(_argv):
         model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
         eager_train(model, tf_ds, epochs, batch_size)
 
-    elif type_training == 'custome_training':
-        custome_training(name_model, path_dataset, epochs, patience=15, batch_size=batch_size, backbone_network=backbone,
-                         loss=loss, metrics=metrics, optimizer=optimizer)
+    elif type_training == 'custom_training':
+
+        list_folders = [f for f in os.listdir(path_dataset) if os.path.isdir(os.path.join(path_dataset, f))]
+        if path_val_dataset:
+            path_validation_dataset = path_val_dataset
+            path_train_dataset = path_dataset
+        elif 'val' in list_folders:
+            path_validation_dataset = os.path.join(path_dataset, 'val')
+            path_train_dataset = os.path.join(path_dataset, 'train')
+        else:
+            path_train_dataset = path_dataset
+            path_validation_dataset = path_dataset
+
+        custom_training(name_model, path_train_dataset, path_validation_dataset, epochs, patience=15, batch_size=batch_size, backbone_network=backbone,
+                         loss=loss, metrics=metrics, optimizer=optimizer, path_test_data=path_dataset)
     else:
-        print('olakease')
+        print(f'{type_training} not in options!')
 
 
 if __name__ == '__main__':
 
     flags.DEFINE_string('name_model', '', 'name of the model')
-    flags.DEFINE_string('path_dataset', '', 'directory dataset')
-    flags.DEFINE_string('type_training', '', 'eager_train or custome_training')
+    flags.DEFINE_string('path_train_dataset', '', 'directory training dataset')
+    flags.DEFINE_string('path_val_dataset', '', 'directory validation dataset')
+    flags.DEFINE_string('type_training', '', 'eager_train or custom_training')
     flags.DEFINE_integer('batch_size', 8, 'batch size')
     flags.DEFINE_integer('epochs', 1, 'epochs')
     flags.DEFINE_string('results_dir', os.path.join(os.getcwd(), 'results'), 'directory to save the results')
